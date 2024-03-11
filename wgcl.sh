@@ -52,15 +52,13 @@ install_wireguard() {
         ip="10.0.0.1"
     fi
 
-    echo -e "
-    [Interface]\n
-    Address = $ip/24\n
-    ListenPort = 51820\n
-    PrivateKey = $pkey\n
-    PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o $int -j MASQUERADE\n
-    PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o $int -j MASQUERADE\n
-    SaveConfig = true
-    " > /etc/wireguard/wg0.conf
+    echo -e "[Interface]
+Address = $ip/24
+ListenPort = 51820
+PrivateKey = $pkey
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o $int -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o $int -j MASQUERADE
+SaveConfig = true" > /etc/wireguard/wg0.conf
     chmod 600 /etc/wireguard/wg0.conf /etc/wireguard/keys/server.key
 
     wg-quick up wg0
@@ -88,6 +86,7 @@ new_client() {
     cat /etc/wireguard/clients/"$client".key | wg pubkey > /etc/wireguard/clients/"$client".key.pub
 
     priv_key=$(cat /etc/wireguard/clients/"$client".key)
+    pub_server_key=$(cat /etc/wireguard/keys/server.key.pub)
     pub_key=$(cat /etc/wireguard/clients/"$client".key.pub)
     pub_ip=$(curl ipinfo.io/ip)
 
@@ -100,38 +99,46 @@ new_client() {
 %s%s3.%s Custom\n\n" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC"
         read -rp "Choose a DNS option: [1-3] " opt
         case $opt in
-            1) dns="1.1.1.1, 1.0.0.1";;
-            2) dns="8.8.8.8, 8.8.4.4";;
-            3) read -rp "Enter a custom DNS: " dns;;
+            1)
+		dns="1.1.1.1, 1.0.0.1"
+		break
+	    ;;
+            2)
+		dns="8.8.8.8, 8.8.4.4"
+		break
+	    ;;
+            3)
+		read -rp "Enter a custom DNS: " dns
+		break
+	    ;;
         esac
     done
 
-    echo -e "
-    [Interface]\n
-    PrivateKey = $priv_key\n
-    Address = $client_ip\n
-    DNS = $dns\n
+    echo -e "[Interface]
+PrivateKey = $priv_key
+Address = $client_ip
+DNS = $dns
 
-    [Peer]\n
-    PublicKey = $pub_key\n
-    AllowedIPs = 0.0.0.0/24\n
-    Endpoint = $pub_ip:51820\n
-    " > /etc/wireguard/clients/"$client".conf
+[Peer]
+PublicKey = $pub_server_key
+AllowedIPs = 0.0.0.0/24
+Endpoint = $pub_ip:51820" > /etc/wireguard/clients/"$client".conf
 
-    wg set wg0 $pub_key allowed-ips $ip
+    wg set wg0 peer $pub_key allowed-ips $client_ip
 }
 
 generate_qr() {
     clear
-    dir="/etc/wireguard/clients/"
+    dir="/etc/wireguard/clients"
     files=($(ls $dir | grep ".conf"))
 
     cont="1"
     for file in $files[@]; do
         printf "%s%s$cont%s $file\n" "$BLD" "$CGR" "$CNC"
     done
-    read -rp "\nChoose an option: [client.conf] " opt
-    qrencode -t ansiutf8 < $dir.$opt
+    echo ""
+    read -rp "Choose an option: [client.conf] " opt
+    qrencode -t ansiutf8 < "$dir/$opt"
 }
 
 if [ $EUID -ne 0 ]; then
@@ -141,7 +148,6 @@ if [ $EUID -ne 0 ]; then
 fi
 
 while true; do
-    clear
     printf "%s%s1.%s Install Wireguard server\n
 %s%s2.%s Add a new client\n
 %s%s3.%s Generate a QR\n
