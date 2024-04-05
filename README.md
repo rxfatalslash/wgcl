@@ -1,5 +1,5 @@
 <div align="center">
-    <img src=""><br>
+    <img src="./assets/wgcl.png"><br>
     Wgcl is a Wireguard CLI tool which helps you to manage your Wireguard server configuration.
 </div>
 
@@ -18,7 +18,7 @@ chmod +x wgcl.sh
 
 # 🖱️ Use
 
-Execute the script ***wgcl.sh** as root.
+Execute the script ***wgcl.sh*** as **root**.
 ```
 $ sudo ./wgcl.sh
                        _
