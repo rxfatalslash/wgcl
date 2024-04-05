@@ -219,9 +219,9 @@ revoke_client() {
         done
         echo ""
         read -rp "Choose an option: [client] " opt
-        key=$(grep "^PrivateKey" $dir/$opt.conf | cut -d= -f2)
-        wg set wg0 peer $key= remove
-        rm /etc/wireguard/clients/$opt.conf
+        key=$(cat /etc/wireguard/clients/$opt.key.pub)
+        wg set wg0 peer $key remove
+        rm /etc/wireguard/clients/$opt.*
     fi
 }
 
@@ -307,7 +307,7 @@ while true; do
 %s%s4.%s Generate a QR\n
 %s%s5.%s Remove Wireguard\n
 %s%s6.%s Exit\n\n" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC"
-    read -rp "$(printf "Choose an option: [%s%s1%s-%s%s5%s] " "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC")" opt
+    read -rp "$(printf "Choose an option: [%s%s1%s-%s%s6%s] " "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC")" opt
     case $opt in
         1) full_install;;
         2) new_client;;
