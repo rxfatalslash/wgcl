@@ -191,6 +191,40 @@ Endpoint = $pub_ip:$port" > /etc/wireguard/clients/"$client".conf
     clear
 }
 
+revoke_client() {
+    if [ ! -d /etc/wireguard ]; then
+        clear
+        printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
+        exit
+    fi
+
+    if [ ! -d /etc/wireguard/clients ]; then
+        clear
+        printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
+        exit
+    fi
+
+    clear
+    dir="/etc/wireguard/clients"
+    files=$(ls $dir | cut -d. -f1 | sort | uniq)
+
+    cont=1
+    if [ $(ls -a /etc/wireguard/clients | wc -l) -le 2 ]; then
+        printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
+        exit
+    else
+        for file in $files; do
+            printf "%s%s%d.%s $file\n" "$BLD" "$CGR" "$cont" "$CNC"
+            ((cont++))
+        done
+        echo ""
+        read -rp "Choose an option: [client] " opt
+        key=$(grep "^PrivateKey" $dir/$opt.conf | cut -d= -f2)
+        wg set wg0 peer $key= remove
+        rm /etc/wireguard/clients/$opt.conf
+    fi
+}
+
 remove_wireguard() {
     distro=$(grep "^NAME=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
     id=$(grep "^ID_LIKE=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
@@ -242,19 +276,20 @@ generate_qr() {
 
     clear
     dir="/etc/wireguard/clients"
-    files=($(ls $dir | grep ".conf"))
+    files=$(ls $dir | cut -d. -f1 | sort | uniq)
 
-    cont="1"
+    cont=1
     if [ $(ls -a /etc/wireguard/clients | wc -l) -le 2 ]; then
         printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
         exit
     else
-        for file in $files[@]; do
-            printf "%s%s$cont%s $file\n" "$BLD" "$CGR" "$CNC"
+        for file in $files; do
+            printf "%s%s%d.%s $file\n" "$BLD" "$CGR" "$cont" "$CNC"
+            ((cont++))
         done
         echo ""
-        read -rp "Choose an option: [client.conf] " opt
-        qrencode -t ansiutf8 < "$dir/$opt"
+        read -rp "Choose an option: [client] " opt
+        qrencode -t ansiutf8 < "$dir/$opt.conf"
     fi
 }
 
@@ -268,19 +303,21 @@ while true; do
     logo
     printf "%s%s1.%s Install Wireguard server\n
 %s%s2.%s Add a new client\n
-%s%s3.%s Generate a QR\n
-%s%s4.%s Remove Wireguard\n
-%s%s5.%s Exit\n\n" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC"
+%s%s3.%s Revoke a client\n
+%s%s4.%s Generate a QR\n
+%s%s5.%s Remove Wireguard\n
+%s%s6.%s Exit\n\n" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC"
     read -rp "$(printf "Choose an option: [%s%s1%s-%s%s5%s] " "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC")" opt
     case $opt in
         1) full_install;;
         2) new_client;;
-        3) generate_qr;;
-        4) remove_wireguard;;
-        5) exit;;
+        3) revoke_client;;
+        4) generate_qr;;
+        5) remove_wireguard;;
+        6) exit;;
         *)
             clear
-            printf "[ %s%sERROR%s ] Choose a valid option: [1-5]\n" "$BLD" "$CRE" "$CNC"
+            printf "[ %s%sERROR%s ] Choose a valid option: [1-6]\n" "$BLD" "$CRE" "$CNC"
         ;;
     esac
 done
