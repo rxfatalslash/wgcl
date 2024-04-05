@@ -6,30 +6,55 @@ CGR=$(tput setaf 2)
 BLD=$(tput bold)
 CNC=$(tput sgr0)
 
+# logo
+logo () {
+    printf '%s%s                       _    
+                      | |   
+   __      ____ _  ___| |   
+   \ \ /\ / / _` |/ __| |   
+    \ V  V / (_| | (__| |   
+     \_/\_/ \__, |\___|_|   
+             __/ |          
+            |___/           
+    %s\n' "$BLD" "$CGR" "$CNC"
+}
+
 declare -g ip=""
 declare -g dns=""
 
 full_install() {
-    distro="$(cat /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g' | awk 'NR==1 {print $1}')"
-    case $distro in
-        ["Ubuntu""Debian"]*)
-            printf "%s%sDebian based system detected%s" "$CBL" "$CGR" "$CNC"
-            if ! dpkg -l | grep -iq "wireguard"; then
+    distro=$(grep "^NAME=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    id=$(grep "^ID_LIKE=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    clear
+    case $distro,$id in
+        "debian")
+            printf "%s%sDebian based system detected%s\n" "$CBL" "$CGR" "$CNC"
+            if ! dpkg -l | grep -iq "wireguard" > /dev/null; then
                 apt-get install -y wireguard
             fi
 
-            if ! dpkg -l | grep -iq "qrencode"; then
+            if ! dpkg -l | grep -iq "qrencode" > /dev/null; then
                 apt-get install -y qrencode
             fi
         ;;
         ["Arch Linux""Arch"]*)
-            printf "%s%sArch based system detected%s" "$CBL" "$CGR" "$CNC"
-            if ! pacman -Qs wireguard-tools; then
+            printf "%s%sArch based system detected%s\n" "$CBL" "$CGR" "$CNC"
+            if ! pacman -Qs wireguard-tools > /dev/null; then
                 pacman -Sy wireguard-tools --noconfirm
             fi
 
-            if ! pacman -Qs qrencode; then
+            if ! pacman -Qs qrencode > /dev/null; then
                 pacman -Sy qrencode --noconfirm
+            fi
+        ;;
+        "fedora")
+            printf "%s%sFedora based system detected%s\n" "$CBL" "$CGR" "$CNC"
+            if ! rpm -qi wireguard-tools > /dev/null; then
+                dnf install -y wireguard-tools
+            fi
+
+            if ! rpm -qi qrencode > /dev/null; then
+                dnf install -y qrencode
             fi
         ;;
     esac
@@ -46,15 +71,41 @@ install_wireguard() {
 
     int=$(ip -o -4 route show to default | awk '{print $5}')
     pkey=$(cat /etc/wireguard/keys/server.key)
-    read -rp "What IP do you want for the Wireguard server?: [10.0.0.1] " ip
+    echo ""
+    read -rp "$(printf "What IP do you want for the Wireguard server?: [%s%s10.0.0.1%s] " "$BLD" "$CGR" "$CNC")" ip
 
-    if -z $ip; then
+    if [ -z $ip ]; then
         ip="10.0.0.1"
     fi
 
+    while true; do
+        echo ""
+        printf "%s%s1.%s Default port [%s%s51820%s]\n
+%s%s2.%s Custom port\n\n" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC"
+        read -rp "$(printf "Choose an option: [%s%s1%s-%s%s2%s] " "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC")" opt
+        case $opt in
+            1)
+                port="51820"
+                break
+            ;;
+            2)
+                clear
+                read -rp "What port do you want for the Wireguard server?: " port
+                if [ $port -lt 1024 ] || [ $port -gt 65535 ]; then
+                    printf "[ %s%sERROR%s ] Choose a valid port" "$BLD" "$CRE" "$CNC"
+                fi
+                break
+            ;;
+            *)
+                clear
+                printf "[ %s%sERROR%s ] Choose a valid option: [1-2]" "$BLD" "$CRE" "$CNC"
+            ;;
+        esac
+    done
+
     echo -e "[Interface]
 Address = $ip/24
-ListenPort = 51820
+ListenPort = $port
 PrivateKey = $pkey
 PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o $int -j MASQUERADE
 PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o $int -j MASQUERADE
@@ -68,12 +119,18 @@ SaveConfig = true" > /etc/wireguard/wg0.conf
 }
 
 new_client() {
-    if [ ! -d /etc/wireguard/clients ]; then
+    if [ ! -d /etc/wireguard ]; then
+        clear
+        printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
+        exit
+    fi
+
+    if [ ! -d /etc/wireguard/clients ] ; then
         mkdir -p /etc/wireguard/clients
     fi
 
     while true; do
-        read -rp "What's the device's name?: " client
+        read -rp "What's the name of the device?: " client
         if [ ! -z $client ]; then
             break
         else
@@ -89,6 +146,8 @@ new_client() {
     pub_server_key=$(cat /etc/wireguard/keys/server.key.pub)
     pub_key=$(cat /etc/wireguard/clients/"$client".key.pub)
     pub_ip=$(curl ipinfo.io/ip)
+    port=$(sudo grep "^ListenPort" /etc/wireguard/wg0.conf | cut -d '=' -f2)
+    port=${port// /}
 
     clear
     read -rp "What is the client's IP: " client_ip
@@ -97,48 +156,106 @@ new_client() {
         printf "%s%s1.%s Cloudflare\n
 %s%s2.%s Google\n
 %s%s3.%s Custom\n\n" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC"
-        read -rp "Choose a DNS option: [1-3] " opt
+        read -rp "$(printf "Choose a DNS option: [1-3] " "$BLD" "$CGR" "$CNC")" opt
         case $opt in
             1)
-		dns="1.1.1.1, 1.0.0.1"
-		break
-	    ;;
+                dns="1.1.1.1, 1.0.0.1"
+                break
+	        ;;
             2)
-		dns="8.8.8.8, 8.8.4.4"
-		break
-	    ;;
+                dns="8.8.8.8, 8.8.4.4"
+                break
+            ;;
             3)
-		read -rp "Enter a custom DNS: " dns
-		break
-	    ;;
+                read -rp "Enter a custom DNS: " dns
+                break
+            ;;
+            *)
+                clear
+                printf "[ %s%sERROR%s ] Choose a valid option: [1-3] " opt
+            ;;
         esac
     done
 
     echo -e "[Interface]
 PrivateKey = $priv_key
-Address = $client_ip
+Address = $client_ip/24
 DNS = $dns
 
 [Peer]
 PublicKey = $pub_server_key
-AllowedIPs = 0.0.0.0/24
-Endpoint = $pub_ip:51820" > /etc/wireguard/clients/"$client".conf
+AllowedIPs = 0.0.0.0/0
+Endpoint = $pub_ip:$port" > /etc/wireguard/clients/"$client".conf
 
     wg set wg0 peer $pub_key allowed-ips $client_ip
+    clear
+}
+
+remove_wireguard() {
+    distro=$(grep "^NAME=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    id=$(grep "^ID_LIKE=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    clear
+    case $distro,$id in
+        "debian")
+            if dpkg -l | grep -iq "wireguard" > /dev/null; then
+                apt-get remove -y wireguard
+            else
+                printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
+                exit
+            fi
+        ;;
+        ["Arch Linux""Arch"]*)
+            if pacman -Qs wireguard-tools > /dev/null; then
+                pacman -R wireguard-tools --noconfirm
+            else
+                printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
+                exit
+            fi
+        ;;
+        "fedora")
+            if rpm -qi wireguard-tools > /dev/null; then
+                dnf remove -y wireguard-tools
+            else
+                printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
+                exit
+            fi
+        ;;
+    esac
+
+    wg_dev=$(basename $(ls -a /etc/wireguard | grep ".conf$") | cut -d '.' -f1)
+    ip link delete $wg_dev
+    rm -rf /etc/wireguard
 }
 
 generate_qr() {
+    if [ ! -d /etc/wireguard ]; then
+        clear
+        printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
+        exit
+    fi
+
+    if [ ! -d /etc/wireguard/clients ]; then
+        clear
+        printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
+        exit
+    fi
+
     clear
     dir="/etc/wireguard/clients"
     files=($(ls $dir | grep ".conf"))
 
     cont="1"
-    for file in $files[@]; do
-        printf "%s%s$cont%s $file\n" "$BLD" "$CGR" "$CNC"
-    done
-    echo ""
-    read -rp "Choose an option: [client.conf] " opt
-    qrencode -t ansiutf8 < "$dir/$opt"
+    if [ $(ls -a /etc/wireguard/clients | wc -l) -le 2 ]; then
+        printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
+        exit
+    else
+        for file in $files[@]; do
+            printf "%s%s$cont%s $file\n" "$BLD" "$CGR" "$CNC"
+        done
+        echo ""
+        read -rp "Choose an option: [client.conf] " opt
+        qrencode -t ansiutf8 < "$dir/$opt"
+    fi
 }
 
 if [ $EUID -ne 0 ]; then
@@ -148,15 +265,22 @@ if [ $EUID -ne 0 ]; then
 fi
 
 while true; do
+    logo
     printf "%s%s1.%s Install Wireguard server\n
 %s%s2.%s Add a new client\n
 %s%s3.%s Generate a QR\n
-%s%s4.%s Exit\n\n" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC"
-    read -rp "Choose an option: [1-4] " opt
+%s%s4.%s Remove Wireguard\n
+%s%s5.%s Exit\n\n" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC"
+    read -rp "$(printf "Choose an option: [%s%s1%s-%s%s5%s] " "$BLD" "$CGR" "$CNC" "$BLD" "$CGR" "$CNC")" opt
     case $opt in
         1) full_install;;
         2) new_client;;
         3) generate_qr;;
-        4) exit;;
+        4) remove_wireguard;;
+        5) exit;;
+        *)
+            clear
+            printf "[ %s%sERROR%s ] Choose a valid option: [1-5]\n" "$BLD" "$CRE" "$CNC"
+        ;;
     esac
 done
