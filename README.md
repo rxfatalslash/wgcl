@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="./assets/wgcl.png"><br>
+    <img src="https://i.imgur.com/sqCPfAu.png"><br>
     Wgcl is a Wireguard CLI tool which helps you to manage your Wireguard server configuration.
 </div>
 

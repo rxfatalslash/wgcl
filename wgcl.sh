@@ -23,21 +23,22 @@ declare -g ip=""
 declare -g dns=""
 
 full_install() {
-    distro=$(grep "^NAME=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    distro=$(grep "^ID=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
     id=$(grep "^ID_LIKE=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    id=${id:-$distro}
     clear
-    case $distro,$id in
-        "debian")
+    case $id in
+        debian*)
             printf "%s%sDebian based system detected%s\n" "$CBL" "$CGR" "$CNC"
-            if ! dpkg -l | grep -iq "wireguard" > /dev/null; then
+            if ! dpkg -l | awk '/wireguard/{found=1} END{exit !found}'; then
                 apt-get install -y wireguard
             fi
 
-            if ! dpkg -l | grep -iq "qrencode" > /dev/null; then
+            if ! dpkg -l | grep -iq "qrencode"; then
                 apt-get install -y qrencode
             fi
         ;;
-        ["Arch Linux""Arch"]*)
+        arch*)
             printf "%s%sArch based system detected%s\n" "$CBL" "$CGR" "$CNC"
             if ! pacman -Qs wireguard-tools > /dev/null; then
                 pacman -Sy wireguard-tools --noconfirm
@@ -47,7 +48,7 @@ full_install() {
                 pacman -Sy qrencode --noconfirm
             fi
         ;;
-        "fedora")
+        fedora*)
             printf "%s%sFedora based system detected%s\n" "$CBL" "$CGR" "$CNC"
             if ! rpm -qi wireguard-tools > /dev/null; then
                 dnf install -y wireguard-tools
@@ -91,7 +92,7 @@ install_wireguard() {
             2)
                 clear
                 read -rp "What port do you want for the Wireguard server?: " port
-                if [ $port -lt 1024 ] || [ $port -gt 65535 ]; then
+                if [[ ! "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
                     printf "[ %s%sERROR%s ] Choose a valid port" "$BLD" "$CRE" "$CNC"
                 fi
                 break
@@ -109,7 +110,7 @@ ListenPort = $port
 PrivateKey = $pkey
 PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o $int -j MASQUERADE
 PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o $int -j MASQUERADE
-SaveConfig = true" > /etc/wireguard/wg0.conf
+SaveConfig = false" > /etc/wireguard/wg0.conf
     chmod 600 /etc/wireguard/wg0.conf /etc/wireguard/keys/server.key
 
     wg-quick up wg0
@@ -135,7 +136,7 @@ new_client() {
             break
         else
             clear
-            printf "[ %s%sERROR%s ] Introduce a device name"
+            printf "[ %s%sERROR%s ] Introduce un device name" "$BLD" "$CRE" "$CNC"
         fi
     done
 
@@ -145,7 +146,7 @@ new_client() {
     priv_key=$(cat /etc/wireguard/clients/"$client".key)
     pub_server_key=$(cat /etc/wireguard/keys/server.key.pub)
     pub_key=$(cat /etc/wireguard/clients/"$client".key.pub)
-    pub_ip=$(curl ipinfo.io/ip)
+    pub_ip=$(curl -s ifconfig.me || curl -s ipinfo.io/ip)
     port=$(sudo grep "^ListenPort" /etc/wireguard/wg0.conf | cut -d '=' -f2)
     port=${port// /}
 
@@ -167,12 +168,12 @@ new_client() {
                 break
             ;;
             3)
-                read -rp "Enter a custom DNS: " dns
+                read -rp "Enter a custom DNS: (Add a comma between both to add 2 DNS)" dns
                 break
             ;;
             *)
                 clear
-                printf "[ %s%sERROR%s ] Choose a valid option: [1-3] " opt
+                printf "[ %s%sERROR%s ] Choose a valid option: [1-3] "opt
             ;;
         esac
     done
@@ -184,10 +185,15 @@ DNS = $dns
 
 [Peer]
 PublicKey = $pub_server_key
+Endpoint = $pub_ip:$port
 AllowedIPs = 0.0.0.0/0
-Endpoint = $pub_ip:$port" > /etc/wireguard/clients/"$client".conf
+PersistentKeepAlive = 25" > /etc/wireguard/clients/"$client".conf
 
-    wg set wg0 peer $pub_key allowed-ips $client_ip
+    # wg set wg0 peer $pub_key allowed-ips $client_ip
+    echo -e "
+[Peer]
+PublicKey = $pub_key
+AllowedIPs = $client_ip/32" >> /etc/wireguard/wg0.conf
     clear
 }
 
@@ -209,7 +215,7 @@ revoke_client() {
     files=$(ls $dir | cut -d. -f1 | sort | uniq)
 
     cont=1
-    if [ $(ls -a /etc/wireguard/clients | wc -l) -le 2 ]; then
+    if [ -z "$(ls -A /etc/wireguard/clients 2>/dev/null)" ]; then
         printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
         exit
     else
@@ -226,11 +232,11 @@ revoke_client() {
 }
 
 remove_wireguard() {
-    distro=$(grep "^NAME=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    # distro=$(grep "^NAME=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
     id=$(grep "^ID_LIKE=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
     clear
-    case $distro,$id in
-        "debian")
+    case $id in
+        debian*)
             if dpkg -l | grep -iq "wireguard" > /dev/null; then
                 apt-get remove -y wireguard
             else
@@ -238,7 +244,7 @@ remove_wireguard() {
                 exit
             fi
         ;;
-        ["Arch Linux""Arch"]*)
+        arch*)
             if pacman -Qs wireguard-tools > /dev/null; then
                 pacman -R wireguard-tools --noconfirm
             else
@@ -246,7 +252,7 @@ remove_wireguard() {
                 exit
             fi
         ;;
-        "fedora")
+        fedora*)
             if rpm -qi wireguard-tools > /dev/null; then
                 dnf remove -y wireguard-tools
             else
@@ -256,8 +262,10 @@ remove_wireguard() {
         ;;
     esac
 
-    wg_dev=$(basename $(ls -a /etc/wireguard | grep ".conf$") | cut -d '.' -f1)
-    ip link delete $wg_dev
+    wg_dev=$(ls /etc/wireguard/*.conf 2>/dev/null | head -n 1 | xargs -n1 basename | cut -d '.' -f1)
+    if [ -n "$wg_dev" ]; then
+        ip link delete "$wg_dev"
+    fi
     rm -rf /etc/wireguard
 }
 
@@ -279,7 +287,7 @@ generate_qr() {
     files=$(ls $dir | cut -d. -f1 | sort | uniq)
 
     cont=1
-    if [ $(ls -a /etc/wireguard/clients | wc -l) -le 2 ]; then
+    if [ -z "$(ls -A /etc/wireguard/clients 2>/dev/null)" ]; then
         printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
         exit
     else
