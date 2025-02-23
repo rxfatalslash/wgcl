@@ -22,6 +22,11 @@ logo () {
 declare -g ip=""
 declare -g dns=""
 
+if [ "$EUID" -ne 0 ]; then
+    printf "[ %s%sERROR%s ] Please run this script as root\n" "$BLD" "$CRE" "$CNC"
+    exit 1
+fi
+
 full_install() {
     distro=$(grep "^ID=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
     id=$(grep "^ID_LIKE=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
@@ -29,33 +34,33 @@ full_install() {
     clear
     case $id in
         debian*)
-            printf "%s%sDebian based system detected%s\n" "$CBL" "$CGR" "$CNC"
+            printf "%s%sDebian based system detected%s\n" "$BLD" "$CGR" "$CNC"
             if ! dpkg -l | awk '/wireguard/{found=1} END{exit !found}'; then
-                apt-get install -y wireguard
+                apt-get update && apt-get install -y wireguard > /dev/null
             fi
 
             if ! dpkg -l | grep -iq "qrencode"; then
-                apt-get install -y qrencode
+                apt-get update && apt-get install -y qrencode > /dev/null
             fi
         ;;
         arch*)
-            printf "%s%sArch based system detected%s\n" "$CBL" "$CGR" "$CNC"
+            printf "%s%sArch based system detected%s\n" "$BLD" "$CGR" "$CNC"
             if ! pacman -Qs wireguard-tools > /dev/null; then
-                pacman -Sy wireguard-tools --noconfirm
+                pacman -Sy wireguard-tools --noconfirm > /dev/null
             fi
 
             if ! pacman -Qs qrencode > /dev/null; then
-                pacman -Sy qrencode --noconfirm
+                pacman -Sy qrencode --noconfirm > /dev/null
             fi
         ;;
         fedora*)
-            printf "%s%sFedora based system detected%s\n" "$CBL" "$CGR" "$CNC"
+            printf "%s%sFedora based system detected%s\n" "$BLD" "$CGR" "$CNC"
             if ! rpm -qi wireguard-tools > /dev/null; then
-                dnf install -y wireguard-tools
+                dnf update && dnf install -y wireguard-tools > /dev/null
             fi
 
             if ! rpm -qi qrencode > /dev/null; then
-                dnf install -y qrencode
+                dnf update && dnf install -y qrencode > /dev/null
             fi
         ;;
     esac
@@ -63,6 +68,9 @@ full_install() {
 }
 
 install_wireguard() {
+    clear
+    chmod -R 700 /etc/wireguard
+
     if [ ! -d /etc/wireguard/keys ]; then
         mkdir -p /etc/wireguard/keys
     fi
@@ -117,13 +125,15 @@ SaveConfig = false" > /etc/wireguard/wg0.conf
     systemctl enable wg-quick@wg0.service
     echo "net.ipv4.ip_forward=1" > /etc/sysctl.conf
     sysctl -p
+    clear
 }
 
 new_client() {
+    clear
     if [ ! -d /etc/wireguard ]; then
         clear
-        printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
-        exit
+        printf "[ %s%sERROR%s ] Wireguard is not installed\n" "$BLD" "$CRE" "$CNC"
+        exit 1
     fi
 
     if [ ! -d /etc/wireguard/clients ] ; then
@@ -168,7 +178,7 @@ new_client() {
                 break
             ;;
             3)
-                read -rp "Enter a custom DNS: (Add a comma between both to add 2 DNS)" dns
+                read -rp "Enter a custom DNS: (Add a comma between both to add 2 DNS) " dns
                 break
             ;;
             *)
@@ -198,26 +208,27 @@ AllowedIPs = $client_ip/32" >> /etc/wireguard/wg0.conf
 }
 
 revoke_client() {
+    clear
     if [ ! -d /etc/wireguard ]; then
         clear
-        printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
-        exit
+        printf "[ %s%sERROR%s ] Wireguard is not installed\n" "$BLD" "$CRE" "$CNC"
+        exit 1
     fi
 
     if [ ! -d /etc/wireguard/clients ]; then
         clear
-        printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
-        exit
+        printf "[ %s%sERROR%s ] There are no clients\n" "$BLD" "$CRE" "$CNC"
+        exit 1
     fi
 
     clear
     dir="/etc/wireguard/clients"
-    files=$(ls $dir | cut -d. -f1 | sort | uniq)
+    files=$(ls $dir | grep -i ".conf" | cut -d. -f1 | sort | uniq)
 
     cont=1
     if [ -z "$(ls -A /etc/wireguard/clients 2>/dev/null)" ]; then
-        printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
-        exit
+        printf "[ %s%sERROR%s ] There are no clients\n" "$BLD" "$CRE" "$CNC"
+        exit 1
     else
         for file in $files; do
             printf "%s%s%d.%s $file\n" "$BLD" "$CGR" "$cont" "$CNC"
@@ -229,35 +240,38 @@ revoke_client() {
         wg set wg0 peer $key remove
         rm /etc/wireguard/clients/$opt.*
     fi
+    clear
 }
 
 remove_wireguard() {
-    # distro=$(grep "^NAME=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    clear
+    distro=$(grep "^ID=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
     id=$(grep "^ID_LIKE=" /etc/os-release | cut -d '=' -f2 | sed -e 's/"//g')
+    id=${id:-$distro}
     clear
     case $id in
         debian*)
             if dpkg -l | grep -iq "wireguard" > /dev/null; then
-                apt-get remove -y wireguard
+                apt-get remove -y wireguard > /dev/null
             else
-                printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
-                exit
+                printf "[ %s%sERROR%s ] Wireguard is not installed\n" "$BLD" "$CRE" "$CNC"
+                exit 1
             fi
         ;;
         arch*)
             if pacman -Qs wireguard-tools > /dev/null; then
-                pacman -R wireguard-tools --noconfirm
+                pacman -R wireguard-tools --noconfirm > /dev/null
             else
-                printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
-                exit
+                printf "[ %s%sERROR%s ] Wireguard is not installed\n" "$BLD" "$CRE" "$CNC"
+                exit 1
             fi
         ;;
         fedora*)
             if rpm -qi wireguard-tools > /dev/null; then
-                dnf remove -y wireguard-tools
+                dnf remove -y wireguard-tools > /dev/null
             else
-                printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
-                exit
+                printf "[ %s%sERROR%s ] Wireguard is not installed\n" "$BLD" "$CRE" "$CNC"
+                exit 1
             fi
         ;;
     esac
@@ -267,29 +281,31 @@ remove_wireguard() {
         ip link delete "$wg_dev"
     fi
     rm -rf /etc/wireguard
+    clear
 }
 
 generate_qr() {
+    clear
     if [ ! -d /etc/wireguard ]; then
         clear
-        printf "[ %s%sERROR%s ] Wireguard is not installed" "$BLD" "$CRE" "$CNC"
-        exit
+        printf "[ %s%sERROR%s ] Wireguard is not installed\n" "$BLD" "$CRE" "$CNC"
+        exit 1
     fi
 
     if [ ! -d /etc/wireguard/clients ]; then
         clear
-        printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
-        exit
+        printf "[ %s%sERROR%s ] There are no clients\n" "$BLD" "$CRE" "$CNC"
+        exit 1
     fi
 
     clear
     dir="/etc/wireguard/clients"
-    files=$(ls $dir | cut -d. -f1 | sort | uniq)
+    files=$(ls $dir | grep -i ".conf" | cut -d. -f1 | sort | uniq)
 
     cont=1
     if [ -z "$(ls -A /etc/wireguard/clients 2>/dev/null)" ]; then
-        printf "[ %s%sERROR%s ] There are no clients" "$BLD" "$CRE" "$CNC"
-        exit
+        printf "[ %s%sERROR%s ] There are no clients\n" "$BLD" "$CRE" "$CNC"
+        exit 1
     else
         for file in $files; do
             printf "%s%s%d.%s $file\n" "$BLD" "$CGR" "$cont" "$CNC"
@@ -303,7 +319,7 @@ generate_qr() {
 
 if [ $EUID -ne 0 ]; then
     clear
-    printf "[ %s%sERROR%s ] Execute the script as root" "$BLD" "$CRE" "$CNC"
+    printf "[ %s%sERROR%s ] Execute the script as root\n" "$BLD" "$CRE" "$CNC"
     exit 1
 fi
 
